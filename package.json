@@ -1,0 +1,24 @@
+{
+  "name": "feedback-llm",
+  "version": "0.1",
+  "description": "Use LLM to parse and normalize 30d feedback",
+  "main": "index.mjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/balena-io-experimental/feedback-llm.git"
+  },
+  "author": "Edwin Joassart",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/balena-io-experimental/feedback-llm/issues"
+  },
+  "homepage": "https://github.com/balena-io-experimental/feedback-llm#readme",
+  "dependencies": {
+    "dotenv": "^16.1.4",
+    "openai": "^3.2.1",
+    "zx": "^7.2.2"
+  }
+}
