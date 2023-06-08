@@ -2,6 +2,7 @@
 
 import * as dotenv from "dotenv"
 import { Configuration, OpenAIApi } from "openai"
+import { getSdk } from "@balena/jellyfish-client-sdk"
 
 dotenv.config()
 
@@ -11,6 +12,17 @@ const configuration = new Configuration({
 })
 
 const openai = new OpenAIApi(configuration)
+const jellyfish = getSdk({
+  apiUrl: process.env.JELLYFISH_URL,
+  apiPrefix: "api/v2/",
+})
+
+const jellyfishClient = await jellyfish.auth.login({
+  username: process.env.JELLYFISH_USERNAME,
+  password: process.env.JELLYFISH_PASSWORD,
+})
+
+const model = process.env.OPENAI_MODEL || "gpt-3.5-turbo"
 
 const context = `
   balenaCloud: A cloud-based platform for deploying, managing, and updating software applications on fleets of edge devices.
@@ -36,26 +48,73 @@ const instructions = `
   - What's user's feedback on the product (Feedback)
 `
 
-const feedabacks = []
-
-const removeCloudFromQuestions = (data) =>
-  data
-    .replace("How Did You First Hear About Balena Cloud", "How Did You First Hear About Balena")
-    .replace("Feedback To Make Balena Cloud Better", "Feedback to Make Balena Better")
-    .replace("Recommend Balena Cloud", "Recommend Balena")
-
-const model = "gpt-3.5-turbo"
-
-for (let feedback of feedabacks) {
-  const prompt = `${context} ${instructions} --- ${removeCloudFromQuestions(feedback)}`
+const summarizeFeedback = async (feedback) => {
+  const prompt = `${context} ${instructions} --- ${feedback}`
 
   const messages = [{ role: "user", content: prompt }]
 
   try {
     const completion = await openai.createChatCompletion({ model, messages })
-    console.log(completion.data.choices[0].message.content)
+    return completion.data.choices[0].message.content
   } catch (error) {
     if (error.response.status === 401) console.error("UNAUTHORIZED: ", error.response.data)
     else console.error(error.response.data)
+  }
+}
+
+if (jellyfishClient) {
+  // Authorise the SDK
+  jellyfish.setAuthToken(jellyfishClient.id)
+
+  // Get and output a list of all feedback contracts
+  const feedabackContracts = await jellyfish.card.getAllByType("user-feedback@1.0.0")
+
+  const feedabacks = feedabackContracts.map((contract) => ({
+    timestamp: contract.data.timestamp,
+    mirrors: contract.data.mirrors,
+    slug: contract.slug,
+    raw: `
+        user: ${contract.data.user}
+        How Did You First Hear About Balena: ${contract.data.curatedOrigin}
+        How Would You Describe Your Role: ${contract.data.howWouldYouDescribeYourRole}
+        How Has your experience been with Balena: ${contract.data.howHasYourExperienceBeenSoFar}
+        Can you describe your use case: ${contract.data.couldYouBrieflyDescribeYourUsecase}
+        How likely are you to recommend Balena to a friend or colleague: ${contract.data.howLikelyAreYouToRecommendBalenaCloud}
+      `,
+  }))
+
+  // send the contract to the summarizeFeedback function the to the GENERIC-LLM dataset
+  for (let feedback of feedabacks) {
+    console.log(feedback)
+
+    // summarize the feedback
+    const summary = await summarizeFeedback(feedback.raw)
+
+    // print the summary
+    console.log(summary)
+
+    // push it to the GENERIC-LLM dataset
+    const data = {
+      metadata: feedback,
+      text: summary,
+      skip_summarize: true,
+    }
+
+    const url = `${process.env.GENERIC_LLM_URL}/api/collection/feedback`
+    const options = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Basic " + Buffer.from(`${process.env.GENERIC_LLM_USERNAME}:${process.env.GENERIC_LLM_PASSWORD}`).toString("base64"),
+      },
+      body: JSON.stringify(data),
+    }
+
+    fetch(url, options)
+      .then((response) => {
+        if (!response.ok) throw new Error(response.statusText)
+        else console.log("ok")
+      })
+      .catch((error) => console.error(error))
   }
 }
